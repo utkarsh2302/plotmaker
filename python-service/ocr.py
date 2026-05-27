@@ -1,11 +1,15 @@
+from __future__ import annotations
+
 import re
+from typing import Optional, Tuple
+
 import numpy as np
 import pytesseract
 from PIL import Image
 import cv2
 
 
-def extract_plot_number(image_region: np.ndarray) -> tuple[str | None, float]:
+def extract_plot_number(image_region: np.ndarray) -> Tuple[Optional[str], float]:
     """
     Run Tesseract OCR on an image region and extract a plot number.
     Returns (plot_number, confidence) where confidence is 0-1.
@@ -45,26 +49,23 @@ def extract_plot_number(image_region: np.ndarray) -> tuple[str | None, float]:
         raw_text = pytesseract.image_to_string(pil_inv, config=config).strip()
 
     plot_number = parse_plot_number(raw_text)
-
-    # Confidence: higher if we found something, lower if the region is tiny
     confidence = 0.85 if plot_number else 0.2
 
     return plot_number, confidence
 
 
-def parse_plot_number(raw_text: str) -> str | None:
+def parse_plot_number(raw_text: str) -> Optional[str]:
     """Extract plot number pattern from raw OCR text."""
     if not raw_text:
         return None
 
     text = raw_text.upper().strip()
 
-    # Patterns in priority order
     patterns = [
-        r"[A-Z]{1,2}-\d{1,4}",   # A-1, AB-12, etc.
-        r"[A-Z]\d{1,3}",          # A1, B23
-        r"\d{1,4}[A-Z]{0,2}",    # 101, 12A
-        r"\d{1,4}",               # plain number
+        r"[A-Z]{1,2}-\d{1,4}",
+        r"[A-Z]\d{1,3}",
+        r"\d{1,4}[A-Z]{0,2}",
+        r"\d{1,4}",
     ]
 
     for pattern in patterns:

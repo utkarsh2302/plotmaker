@@ -2,17 +2,39 @@ import cv2
 import numpy as np
 from ocr import extract_plot_number
 
+MAX_PROCESS_DIM = 4500  # px — cap before any OpenCV work
+
+
+def ensure_max_resolution(img: np.ndarray) -> tuple[np.ndarray, float]:
+    """
+    Downscale image to MAX_PROCESS_DIM on its longest side if necessary.
+    Returns (scaled_img, scale_factor) where scale_factor = new / original.
+    """
+    h, w = img.shape[:2]
+    longest = max(h, w)
+    if longest <= MAX_PROCESS_DIM:
+        return img, 1.0
+
+    scale = MAX_PROCESS_DIM / longest
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+    resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    return resized, scale
+
 
 def detect_plots(image_bytes: bytes) -> list[dict]:
     """
     Main detection pipeline.
-    Takes raw image bytes, returns list of detected plot dicts.
+    Takes raw image bytes, returns list of detected plot dicts with normalized (0-1) coordinates.
     """
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
     if img is None:
-        raise ValueError("Could not decode image")
+        raise ValueError("Could not decode image — ensure it is a valid JPG or PNG")
+
+    # Safety cap: large images (300-500MB) get downscaled here
+    img, _scale = ensure_max_resolution(img)
 
     h, w = img.shape[:2]
     total_area = h * w
@@ -51,17 +73,16 @@ def detect_plots(image_bytes: bytes) -> list[dict]:
         if sides < 3 or sides > 12:
             continue
 
-        # Normalize points to 0-1
+        # Normalize points to 0-1 (coordinates are already in the scaled image space,
+        # and since we normalize by current w/h, they map correctly to the original)
         points = [
             {"x": round(float(pt[0][0]) / w, 4), "y": round(float(pt[0][1]) / h, 4)}
             for pt in approx
         ]
 
-        # Compute center for dedup check
+        # Deduplicate by center proximity
         cx = sum(p["x"] for p in points) / len(points)
         cy = sum(p["y"] for p in points) / len(points)
-
-        # Skip if very close to an already-accepted contour
         too_close = any(abs(cx - sc[0]) < 0.02 and abs(cy - sc[1]) < 0.02 for sc in seen_centers)
         if too_close:
             continue
@@ -69,7 +90,6 @@ def detect_plots(image_bytes: bytes) -> list[dict]:
 
         # Crop region for OCR
         x, y, bw, bh = cv2.boundingRect(contour)
-        # Pad slightly
         pad = 4
         x1 = max(0, x - pad)
         y1 = max(0, y - pad)
@@ -77,9 +97,8 @@ def detect_plots(image_bytes: bytes) -> list[dict]:
         y2 = min(h, y + bh + pad)
         region = img[y1:y2, x1:x2]
 
-        plot_number, ocr_confidence = extract_plot_number(region)
+        plot_number, _ = extract_plot_number(region)
 
-        # Confidence scoring
         is_rect = sides == 4
         has_number = plot_number is not None
 
@@ -102,7 +121,5 @@ def detect_plots(image_bytes: bytes) -> list[dict]:
             "area_ratio": round(area / total_area, 4),
         })
 
-    # Sort by confidence descending
     results.sort(key=lambda x: x["confidence"], reverse=True)
-
     return results
