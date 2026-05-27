@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 const PYTHON_URL = process.env.PYTHON_SERVICE_URL ?? "http://127.0.0.1:8001";
 
-// Allow up to 3 minutes — large images take time
-export const maxDuration = 180;
+// Detection targets < 20s on 400-plot images; 90s is a generous safety cap
+export const maxDuration = 90;
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,8 +12,7 @@ export async function POST(req: NextRequest) {
     const res = await fetch(`${PYTHON_URL}/detect`, {
       method: "POST",
       body: formData,
-      // Node.js fetch doesn't have a built-in timeout; AbortSignal handles it
-      signal: AbortSignal.timeout(150_000), // 2.5 min
+      signal: AbortSignal.timeout(80_000), // 80s hard cap
     });
 
     const data = await res.json();
